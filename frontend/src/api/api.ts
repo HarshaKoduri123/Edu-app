@@ -94,9 +94,20 @@ export async function loginUser(email: string, password: string) {
 
   const data = await handleResponse(res);
 
-  // Save tokens
+  // Save tokens and user info
   localStorage.setItem("access", data.access);
   localStorage.setItem("refresh", data.refresh);
+  localStorage.setItem("user", JSON.stringify(data.user || {}));
+  
+  // Store role separately for easy access
+  if (data.user?.role) {
+    localStorage.setItem("user_role", data.user.role);
+  }
+  
+  // Store email for display
+  if (data.user?.email) {
+    localStorage.setItem("user_email", data.user.email);
+  }
 
   return data;
 }
@@ -105,6 +116,8 @@ export function logoutUser() {
   localStorage.removeItem("access");
   localStorage.removeItem("refresh");
   localStorage.removeItem("user");
+  localStorage.removeItem("user_role");
+  localStorage.removeItem("user_email");
 }
 
 // ===========================================================
@@ -113,6 +126,10 @@ export function logoutUser() {
 
 export async function getCourses(token: string) {
   return authFetch("/api/courses/", token);
+}
+
+export async function getCourseDetail(token: string, courseId: number) {
+  return authFetch(`/api/courses/${courseId}/`, token);
 }
 
 export async function createCourse(
@@ -145,6 +162,17 @@ export async function updateCourse(
 export async function deleteCourse(token: string, courseId: number) {
   return authFetch(`/api/courses/${courseId}/`, token, {
     method: "DELETE",
+  });
+}
+
+export async function togglePublishCourse(
+  token: string, 
+  courseId: number, 
+  publish: boolean
+) {
+  return authFetch(`/api/courses/${courseId}/`, token, {
+    method: "PATCH",
+    body: JSON.stringify({ is_published: publish }),
   });
 }
 
@@ -231,7 +259,6 @@ export async function createSubSection(
   return handleResponse(res);
 }
 
-
 export async function updateSubSection(
   token: string,
   subSectionId: number,
@@ -250,4 +277,121 @@ export async function deleteSubSection(
   return authFetch(`/api/subsections/${subSectionId}/`, token, {
     method: "DELETE",
   });
+}
+
+// ===========================================================
+// STUDENT ENDPOINTS
+// ===========================================================
+
+export async function getStudentCourses(token: string) {
+  return authFetch("/api/student/courses/", token);
+}
+
+export async function getStudentCourseDetail(token: string, courseId: number) {
+  return authFetch(`/api/student/courses/${courseId}/`, token);
+}
+
+export async function enrollInCourse(token: string, courseId: number) {
+  return authFetch(`/api/student/courses/${courseId}/enroll/`, token, {
+    method: "POST",
+  });
+}
+
+export async function getStudentProgress(token: string, courseId: number) {
+  return authFetch(`/api/student/courses/${courseId}/progress/`, token);
+}
+
+export async function updateProgress(
+  token: string,
+  subsectionId: number,
+  completed: boolean
+) {
+  return authFetch(`/api/student/progress/${subsectionId}/`, token, {
+    method: "POST",
+    body: JSON.stringify({ completed }),
+  });
+}
+
+// ===========================================================
+// TOKEN REFRESH
+// ===========================================================
+
+export async function refreshToken(refresh: string) {
+  const res = await fetch(`${API_BASE}/api/token/refresh/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh }),
+  });
+
+  const data = await handleResponse(res);
+  
+  // Update stored access token
+  localStorage.setItem("access", data.access);
+  
+  return data.access;
+}
+
+// ===========================================================
+// PROFILE MANAGEMENT
+// ===========================================================
+
+export async function getProfile(token: string) {
+  return authFetch("/api/profile/", token);
+}
+
+export async function updateProfile(token: string, data: any) {
+  return authFetch("/api/profile/", token, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+// ===========================================================
+// UTILITY FUNCTIONS
+// ===========================================================
+
+// Function to check if token is valid
+export function isTokenValid(): boolean {
+  const token = localStorage.getItem("access");
+  if (!token) return false;
+  return token.length > 10;
+}
+
+// Function to get current user role
+export function getUserRole(): string | null {
+  return localStorage.getItem("user_role");
+}
+
+// Function to get current user info
+export function getUserInfo(): any {
+  const userStr = localStorage.getItem("user");
+  return userStr ? JSON.parse(userStr) : null;
+}
+
+// Function to make authenticated requests with auto token refresh
+export async function authRequest(
+  url: string,
+  options: RequestInit = {}
+) {
+  let token = localStorage.getItem("access");
+  const refresh = localStorage.getItem("refresh");
+  
+  try {
+    return await authFetch(url, token, options);
+  } catch (error: any) {
+    // If token expired, try to refresh
+    if (error.message.includes("401") || error.message.includes("token")) {
+      if (refresh) {
+        try {
+          token = await refreshToken(refresh);
+          return await authFetch(url, token, options);
+        } catch (refreshError) {
+          logoutUser();
+          window.location.href = "/";
+          throw refreshError;
+        }
+      }
+    }
+    throw error;
+  }
 }
